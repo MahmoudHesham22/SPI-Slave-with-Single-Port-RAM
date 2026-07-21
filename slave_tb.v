@@ -92,7 +92,7 @@ initial begin
      MOSI_tb = 0 ;  
      @(negedge clk) ;
      SS_n_tb = 0 ;
-     MOSI_tb = 1 ;          //read address  
+     MOSI_tb = 1 ;           
      @(negedge clk) ;
      MOSI_tb = 1 ;  @(negedge clk) ; //1
      MOSI_tb = 1 ;  @(negedge clk) ; //2
