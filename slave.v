@@ -1,117 +1,163 @@
-module SPI_SLAVE (MOSI,MISO,SS_n,clk,rst_n,rx_data,rx_valid,tx_data,tx_valid) ;
-input MOSI,clk,rst_n,SS_n,tx_valid ;
-input [7:0] tx_data ;
-output reg MISO ;
-output reg [9:0] rx_data=0 ;
-output reg rx_valid ;
-parameter IDLE = 0, READ_DATA=1, READ_ADD=2, CHK_CMD=3, WRITE=4  ;
-(*fsm_encoding = "sequential"*)
-reg [2:0] ns,cs;
-reg w1=0 ;
-integer  i=9 ;
-integer j = 0 ;
+module SPI_slave (
+    input wire clk ,
+    input wire  rst_n ,
+    input wire MOSI ,
+    input wire SS_n , 
+    input wire [7:0] tx_data ,
+    input wire tx_valid ,
+    output reg MISO ,
+    output reg [9:0] rx_data ,
+    output reg rx_valid
+);
+
+//========================================================================================
+// state definition
+//========================================================================================
+localparam IDLE = 2'b00;
+localparam CHK_CMD = 2'b01;
+localparam WRITE = 2'b10;
+localparam READ = 2'b11;
+
+//========================================================================================
+// state register
+//========================================================================================
+reg [1:0] cs, ns;
+reg read_address_received;
+reg [3:0] bit_cnt;
+
+
+//========================================================================================
+// next state logic
+//========================================================================================
 always @(*) begin
-    case (cs)
-        IDLE: 
-        begin
-            if(!SS_n)
-            ns = CHK_CMD ;
-            else
-            ns = IDLE ;
-        end
-        READ_DATA:
-        begin
-            if(SS_n)
-            ns = IDLE ;
-            else
-            ns = READ_DATA ;
-        end
-        READ_ADD:
-        begin
-            if(SS_n)
-            ns = IDLE ;
-            else 
-            ns = READ_ADD ;
-        end
-        CHK_CMD :
-        begin
-            if (SS_n==0 && MOSI==1 && w1==0 && i==9) 
-                ns = READ_ADD ;
-            else if(SS_n==0 && MOSI==1 && w1==1 && i==9)
-                ns = READ_DATA ;
-            else if (SS_n==0 && MOSI==0 && i==9)
-                ns = WRITE ;
-            else 
-                ns = IDLE  ;
-        end 
-        WRITE :
-        begin
-            if(SS_n)
-            ns = IDLE ;
-            else 
-            ns = WRITE ;
-        end
-    endcase
-end
-always @(posedge clk) begin
-    case (cs)
-        WRITE:
-        begin
-            if (SS_n==0 && i>=0) begin
-                    rx_data[i] <= MOSI ;
-                    i <= i-1 ;
-                    rx_valid <= 0;
-                end
-            if(i==0)
-                rx_valid <= 1;
-            if(i== -1 ) begin
-                i <=9 ;
-                end
-        end
-        READ_ADD :
-         begin
-            if(SS_n==0 && i>=0)begin
-                    rx_data[i] <= MOSI ;
-                    i <= i-1 ;
-                    w1<=1 ;
-                    if(i==0)
-                      rx_valid <= 1;
-                end
-             if(i== -1 )
-                i <=9 ;
-
-         end
-         IDLE:
-         begin
-          MISO <= 0 ;
-         end
-        READ_DATA: 
-        begin
-           if(SS_n==0 && i>=0 && tx_valid==1 )begin
-                rx_data[i] <= MOSI ;
-                j <=j+1 ;
-                if(j<=1) begin
-                i <= i-1 ;
-                end
-                end
-            if(i<8 && i>=0 && j>=3) begin
-                 MISO <= tx_data[i] ;
-                 i <= i-1 ;
+    case(cs)
+        IDLE: begin
+            if(!SS_n) begin
+                ns = CHK_CMD;
             end
-            if( i== -1 )
-                i <= 9 ;  
-                
+            else begin
+                ns = IDLE;
+            end
         end
+        CHK_CMD: begin
+            if(SS_n) begin
+                ns = IDLE;
+            end
+            else if (!MOSI && !SS_n) begin
+                ns = WRITE;
+            end
+            else if (MOSI && !SS_n) begin
+                ns = READ;
+            end
+            else begin
+                ns = CHK_CMD;
+            end
+        end
+        WRITE: begin
+            if(SS_n) begin
+                ns = IDLE;
+            end
+            else begin
+                ns = WRITE;
+            end
+        end
+        READ: begin
+            if(SS_n) begin
+                ns = IDLE;
+            end
+            else begin
+                ns = READ;
+            end
+        end
+        default: ns = IDLE;
     endcase
 end
 
-always @(posedge clk ) begin
-     if(!rst_n)  begin
-        cs <= IDLE ;    
-     end
-     else 
-       cs <= ns ;
+//========================================================================================
+// state transition logic
+//========================================================================================
+always @(posedge clk or negedge rst_n) begin
+    if(!rst_n)begin
+        cs <= IDLE;
+    end
+    else begin
+        cs <= ns;
+    end
 end
 
+//========================================================================================
+// output logic
+//========================================================================================
+always @(posedge clk or negedge rst_n) begin 
+    if(!rst_n) begin
+        rx_data <= 10'b0;
+        rx_valid <= 1'b0;
+        MISO <= 1'b0;
+        bit_cnt <= 4'b0;
+        read_address_received <= 1'b0;
+    end
+    else begin
+        rx_valid <= 1'b0;
+        MISO <= 1'b0;
+        case(cs)
+            IDLE: begin
+                rx_valid <= 1'b0;
+            end
+            CHK_CMD: begin
+                rx_valid <= 1'b0;
+            end
+            
+            WRITE: begin
+                if (!SS_n) begin
+                    rx_data <= {rx_data[8:0], MOSI};   // shift in ONE bit this clock
+                    if (bit_cnt == 9) begin
+                        rx_valid <= 1'b1;
+                        bit_cnt <= 0;
+                    end else begin
+                        rx_valid <= 1'b0;
+                        bit_cnt <= bit_cnt + 1;
+                    end
+                end
+            end
 
+            READ: begin
+                if (read_address_received) begin
+                    if (!SS_n && tx_valid) begin
+                        MISO <= tx_data[8 - bit_cnt];                   
+                        bit_cnt <= bit_cnt + 1'b1;
+                        if(bit_cnt == 4'd8) begin                       //counter resets after it reaches 8, as it starts from 1 because it enters else condition first 
+                            read_address_received <= 1'b0;              // before tx valid asserted
+                            bit_cnt <= 4'b0;
+                        end
+                    end
+                    else if (!SS_n && !tx_valid) begin
+                        rx_data <= {rx_data[8:0], MOSI};
+                        if (bit_cnt == 4'd9) begin
+                            rx_valid <= 1'b1;
+                            bit_cnt <= 4'b0;
+                        end
+                        else begin
+                            bit_cnt <= bit_cnt + 1'b1;
+                        end
+                    end
+                end
+                else begin
+                    if (!SS_n) begin
+                        rx_data <= {rx_data[8:0], MOSI};
+                        if (bit_cnt == 4'd9) begin
+                            rx_valid <= 1'b1;
+                            read_address_received <= 1'b1;
+                            bit_cnt <= 4'b0;
+                        end
+                        else begin
+                            bit_cnt <= bit_cnt + 1'b1;
+                        end
+                    end
+                end
+            end
+        endcase
+    end
+end
+
+    
 endmodule
