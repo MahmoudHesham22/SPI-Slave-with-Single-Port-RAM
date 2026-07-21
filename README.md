@@ -67,8 +67,3 @@ IDLE ──(SS_n low)──▶ CHK_CMD ──(MOSI=0)──▶ WRITE ──(SS_n
 | `tx_valid`  | out | 1              | Asserted for one cycle when `dout` is valid   |
 
 Parameters: `MEM_DEPTH` (default 256), `ADDR_SIZE` (default 8).
-
-## Known Issues / Design Notes
-
-These are open items worth resolving before this is considered production-ready:
-
